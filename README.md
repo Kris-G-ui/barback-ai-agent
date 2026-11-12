@@ -8,7 +8,7 @@ cab"*. An LLM turns that into validated operations, BarBack runs them against th
 inventory database, and it reports back. It also finds what's below par, writes
 supplier order emails, exports reports and pings the team chat.
 
-- **Live demo:** `<your Streamlit URL>`
+- **Live demo:** https://barback-ai-agent-8dcpla7kcputfwpfq5bgpz.streamlit.app/
 - **Demo video:** `<your YouTube URL>`
 
 ---
