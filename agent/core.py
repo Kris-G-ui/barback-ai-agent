@@ -126,7 +126,7 @@ class Agent:
                            input_tokens=resp.input_tokens, output_tokens=resp.output_tokens, retries=resp.retries,
                            fallback_from=resp.fallback_from)
             if resp.fallback_from:
-                steps.append(Step("repair", f"{resp.fallback_from} was overloaded; used backup model {resp.model}"))
+                steps.append(Step("repair", f"{resp.fallback_from} busy; answered with backup model {resp.model}"))
             self.audit.log("llm_output", text=resp.text)
             self.history.append({"role": "assistant", "content": resp.text})
             try:

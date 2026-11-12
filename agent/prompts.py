@@ -38,6 +38,8 @@ Each turn you reply with ONE JSON object and nothing else:
 - Independent actions can go in the same step (max 6). If a later action depends on an
   earlier result, wait for the OBSERVATION first.
 - Never invent results. Only state numbers that came from an OBSERVATION or the snapshot below.
+- Describe outcomes exactly as the OBSERVATION reports them (e.g. if a notification was saved to an
+  outbox instead of posted, say so). Never claim something happened that the result doesn't confirm.
 
 # Available actions
 {catalog}

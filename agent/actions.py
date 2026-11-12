@@ -341,11 +341,16 @@ class Toolbox:
         if self.webhook_url:
             r = requests.post(self.webhook_url, json=payload, timeout=10)
             r.raise_for_status()
-            return {"sent": True, "channel": "webhook", "status": r.status_code}
+            return {"posted_to_team_chat": True, "status": r.status_code}
         outbox = self.workdir / "outbox.jsonl"
         with outbox.open("a") as f:
             f.write(json.dumps({"ts": now(), "message": message}) + "\n")
-        return {"sent": True, "channel": "local outbox (no WEBHOOK_URL configured)"}
+        return {
+            "posted_to_team_chat": False,
+            "saved_to": "local outbox file",
+            "note": "No team chat webhook is configured, so the message was NOT posted to chat. "
+                    "It was saved to the local outbox instead. Tell the user exactly this.",
+        }
 
     # ======================================================= REGISTRATION
     def _register_all(self):

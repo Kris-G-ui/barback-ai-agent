@@ -172,7 +172,7 @@ def test_draft_order_and_notification_outbox(make):
     text = (tb.exports / out["file"]).read_text()
     assert "Southern Glazer's" in text and "Jameson" in text
     tb.webhook_url = None
-    assert "outbox" in tb.execute("send_notification", {"message": "86 Guinness"})["channel"]
+    r = tb.execute("send_notification", {"message": "86 Guinness"}); assert r["posted_to_team_chat"] is False and "outbox" in r["saved_to"]
 
 
 def test_llm_error_surfaces_cleanly(make):
