@@ -52,7 +52,7 @@ class LLMResponse:
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5",
     "openai": "gpt-4o-mini",
-    "gemini": "gemini-2.0-flash",
+    "gemini": "gemini-3.8-flash",
 }
 
 KEY_ENV = {
@@ -68,7 +68,7 @@ class LLMClient:
     model: str | None = None
     api_key: str | None = None
     temperature: float = 0.0
-    max_tokens: int = 1500
+    max_tokens: int = 4096
     timeout_s: float = 45.0
     max_retries: int = 4
     base_backoff_s: float = 1.0
@@ -124,6 +124,11 @@ class LLMClient:
                 raise LLMAuthError(
                     f"{self.provider} says the API key is not valid. Check {KEY_ENV[self.provider]} "
                     "in your Streamlit secrets (full key, no extra spaces)."
+                )
+            if resp.status_code == 404 and "model" in resp.text.lower():
+                raise LLMResponseError(
+                    f"Model '{self.model}' isn't available from {self.provider}. "
+                    "Change the Model box in the sidebar to a current model name."
                 )
             if resp.status_code >= 400:
                 raise LLMResponseError(f"{self.provider} error {resp.status_code}: {resp.text[:500]}")
@@ -231,5 +236,6 @@ class LLMClient:
             reason = data.get("promptFeedback", {}).get("blockReason")
             raise LLMResponseError(f"Gemini returned no content (block reason: {reason}).") from exc
         usage = data.get("usageMetadata", {})
-        text = "".join(p.get("text", "") for p in parts).strip()
+        # newer models may return "thought" parts; keep only the answer text
+        text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
         return text, usage.get("promptTokenCount"), usage.get("candidatesTokenCount")

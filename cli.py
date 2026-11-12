@@ -1,7 +1,7 @@
 """BarBack — terminal interface.
 
     python cli.py --provider anthropic
-    python cli.py --provider gemini --model gemini-2.0-flash
+    python cli.py --provider gemini --model gemini-3.8-flash
 
 Commands:  /inv  show inventory   /log  recent audit events   /reset  new session   /quit
 """
