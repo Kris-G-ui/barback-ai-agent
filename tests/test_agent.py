@@ -208,3 +208,26 @@ def test_llm_client_retries_on_429(monkeypatch):
     monkeypatch.setattr("time.sleep", lambda s: None)
     r = c.chat("sys", [{"role": "user", "content": "hi"}])
     assert r.retries == 2 and r.text == "{}"
+
+
+def test_llm_client_falls_back_when_overloaded(monkeypatch):
+    from agent.llm import LLMClient
+
+    class R:
+        def __init__(self, code, body=None):
+            self.status_code, self._b, self.headers, self.text = code, body, {}, "high demand"
+        def json(self):
+            return self._b
+
+    ok = {"candidates": [{"content": {"parts": [{"text": "{}"}]}}], "usageMetadata": {}}
+    seq = [R(503), R(503), R(200, ok)]
+    seen = []
+    c = LLMClient("gemini", model="gemini-3.8-flash", api_key="k", max_retries=1, base_backoff_s=0)
+    def post(url, **k):
+        seen.append(url)
+        return seq.pop(0)
+    monkeypatch.setattr(c._session, "post", post)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    r = c.chat("sys", [{"role": "user", "content": "hi"}])
+    assert r.fallback_from == "gemini-3.8-flash" and r.model == "gemini-flash-latest"
+    assert c.model == "gemini-3.8-flash"  # primary restored

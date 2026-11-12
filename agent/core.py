@@ -97,7 +97,10 @@ class Agent:
             system = build_system_prompt(self.toolbox.catalog(), self.toolbox.store.all_items())
             resp = self.llm.chat(system, self._context())
             self.audit.log("llm_call", provider=resp.provider, model=resp.model, latency_s=resp.latency_s,
-                           input_tokens=resp.input_tokens, output_tokens=resp.output_tokens, retries=resp.retries)
+                           input_tokens=resp.input_tokens, output_tokens=resp.output_tokens, retries=resp.retries,
+                           fallback_from=resp.fallback_from)
+            if resp.fallback_from:
+                steps.append(Step("repair", f"{resp.fallback_from} was overloaded; used backup model {resp.model}"))
             self.audit.log("llm_output", text=resp.text)
             self.history.append({"role": "assistant", "content": resp.text})
             try:

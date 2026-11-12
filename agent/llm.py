@@ -34,6 +34,10 @@ class LLMRateLimitError(LLMError):
     """Still rate limited after all retries."""
 
 
+class LLMOverloadedError(LLMError):
+    """Provider kept returning 5xx (e.g. 503 high demand) after all retries."""
+
+
 class LLMResponseError(LLMError):
     """Provider returned something we could not use."""
 
@@ -47,12 +51,20 @@ class LLMResponse:
     input_tokens: int | None = None
     output_tokens: int | None = None
     retries: int = 0
+    fallback_from: str | None = None
 
 
 DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5",
     "openai": "gpt-4o-mini",
     "gemini": "gemini-3.8-flash",
+}
+
+# Tried in order if the main model stays overloaded (429/503) after all retries.
+FALLBACK_MODELS = {
+    "anthropic": [],
+    "openai": [],
+    "gemini": ["gemini-flash-latest", "gemini-flash-lite-latest"],
 }
 
 KEY_ENV = {
@@ -88,6 +100,28 @@ class LLMClient:
 
     # ------------------------------------------------------------------ public
     def chat(self, system: str, messages: list[dict]) -> LLMResponse:
+        """Send a conversation; if the model is overloaded after retries, fall back to backup models."""
+        primary = self.model
+        candidates = [primary] + [m for m in FALLBACK_MODELS.get(self.provider, []) if m != primary]
+        last_exc: LLMError | None = None
+        try:
+            for m in candidates:
+                self.model = m
+                try:
+                    resp = self._chat_once(system, messages)
+                    if m != primary:
+                        resp.fallback_from = primary
+                    return resp
+                except (LLMRateLimitError, LLMOverloadedError) as exc:
+                    last_exc = exc
+            raise LLMRateLimitError(
+                f"{self.provider} is overloaded right now (tried {', '.join(candidates)}). "
+                "Wait a minute and try again."
+            ) from last_exc
+        finally:
+            self.model = primary
+
+    def _chat_once(self, system: str, messages: list[dict]) -> LLMResponse:
         """Send a conversation and return the assistant's text.
 
         ``messages`` is a list of ``{"role": "user"|"assistant", "content": str}``.
@@ -116,7 +150,9 @@ class LLMClient:
                         raise LLMRateLimitError(
                             f"{self.provider} rate limit hit; gave up after {attempt} retries."
                         )
-                    raise LLMError(f"{self.provider} server error {resp.status_code}: {resp.text[:300]}")
+                    raise LLMOverloadedError(
+                        f"{self.provider} server error {resp.status_code} on {self.model}: {resp.text[:200]}"
+                    )
                 self._sleep(attempt, resp.headers.get("retry-after"))
                 attempt += 1
                 continue
