@@ -67,6 +67,11 @@ FALLBACK_MODELS = {
     "gemini": ["gemini-flash-latest", "gemini-flash-lite-latest"],
 }
 
+# provider -> (model that last worked as a fallback, expiry timestamp). Shared across
+# sessions on purpose: if the primary model is overloaded for one user it is for all.
+_STICKY: dict[str, tuple[str, float]] = {}
+STICKY_S = 300
+
 KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
@@ -104,6 +109,11 @@ class LLMClient:
         """Send a conversation; if the model is overloaded after retries, fall back to backup models."""
         primary = self.model
         candidates = [primary] + [m for m in FALLBACK_MODELS.get(self.provider, []) if m != primary]
+        sticky = _STICKY.get(self.provider)
+        if sticky and sticky[1] > time.time() and sticky[0] in candidates:
+            # primary was overloaded a moment ago: start with the backup that worked
+            candidates.remove(sticky[0])
+            candidates.insert(0, sticky[0])
         last_exc: LLMError | None = None
         overall = time.time() + self.budget_s
         saved_retries = self.max_retries
@@ -113,10 +123,15 @@ class LLMClient:
                 self.max_retries = saved_retries if i == 0 else 1  # backups: one quick retry
                 # primary gets ~55% of the budget so the backups still have time to run
                 self._deadline = min(overall, time.time() + self.budget_s * 0.55) if i == 0 else overall
+                if m != primary and i == 0:
+                    self._deadline = overall  # sticky backup goes first: give it the full budget
                 try:
                     resp = self._chat_once(system, messages)
                     if m != primary:
                         resp.fallback_from = primary
+                        _STICKY[self.provider] = (m, time.time() + STICKY_S)
+                    elif self.provider in _STICKY:
+                        _STICKY.pop(self.provider, None)
                     return resp
                 except (LLMRateLimitError, LLMOverloadedError) as exc:
                     last_exc = exc

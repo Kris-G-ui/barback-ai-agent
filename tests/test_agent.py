@@ -252,3 +252,36 @@ def test_llm_client_respects_time_budget(monkeypatch):
     with pytest.raises(LLMRateLimitError, match="overloaded"):
         c.chat("sys", [{"role": "user", "content": "hi"}])
     assert clock[0] <= 62
+
+
+def test_results_kept_when_summary_call_fails(make):
+    agent, _ = make([
+        J("x", [A("low_stock_report")]),
+        LLMRateLimitError("overloaded"),
+    ])
+    res = agent.send("what's low?")
+    assert res.status == "done" and "Raw results" in res.response and "Jameson" in res.response
+    assert agent.history[-1]["role"] == "assistant"
+
+
+def test_sticky_fallback(monkeypatch):
+    import agent.llm as L
+    L._STICKY.clear()
+    class R:
+        def __init__(self, code, body=None):
+            self.status_code, self._b, self.headers, self.text = code, body, {}, "busy"
+        def json(self):
+            return self._b
+    ok = {"candidates": [{"content": {"parts": [{"text": "{}"}]}}], "usageMetadata": {}}
+    urls = []
+    seq = [R(503), R(503), R(200, ok), R(200, ok)]
+    c = L.LLMClient("gemini", model="gemini-3.8-flash", api_key="k", max_retries=1, base_backoff_s=0)
+    def post(url, **k):
+        urls.append(url)
+        return seq.pop(0)
+    monkeypatch.setattr(c._session, "post", post)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    c.chat("s", [{"role": "user", "content": "a"}])
+    c.chat("s", [{"role": "user", "content": "b"}])
+    assert "gemini-flash-latest" in urls[-1]   # second call went straight to the backup
+    L._STICKY.clear()

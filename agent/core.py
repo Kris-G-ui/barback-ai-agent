@@ -154,6 +154,17 @@ class Agent:
                               "try asking again more specifically if something's missing.", steps)
         except (LLMError, ValidationError) as exc:
             self.audit.log("turn_error", error=str(exc))
+            done = [s for s in steps if s.kind == "action" and s.ok]
+            if done and self.history and self.history[-1]["role"] == "user":
+                # Actions already ran: keep them, and close the turn with a plain summary
+                # so the user still gets the results and the history stays well-formed.
+                lines = [f"- `{s.text}` → {json.dumps(s.data, default=str)[:1500]}" for s in done]
+                msg = ("I completed these actions, but the AI service failed before I could write a "
+                       f"summary ({exc}). Raw results:\n" + "\n".join(lines))
+                self.history.append({"role": "assistant", "content": json.dumps(
+                    {"thought": "summary failed", "actions": [], "response": msg})})
+                self.pending, self._pending_results = [], []
+                return TurnResult("done", msg, steps)
             # roll back this turn so the conversation stays well-formed
             del self.history[self._turn_start:]
             self.pending, self._pending_results = [], []
