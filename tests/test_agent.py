@@ -231,3 +231,24 @@ def test_llm_client_falls_back_when_overloaded(monkeypatch):
     r = c.chat("sys", [{"role": "user", "content": "hi"}])
     assert r.fallback_from == "gemini-3.8-flash" and r.model == "gemini-flash-latest"
     assert c.model == "gemini-3.8-flash"  # primary restored
+
+
+def test_llm_client_respects_time_budget(monkeypatch):
+    import time as _t
+    from agent.llm import LLMClient, LLMRateLimitError
+
+    clock = [0.0]
+    monkeypatch.setattr(_t, "time", lambda: clock[0])
+    monkeypatch.setattr(_t, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+
+    class R:
+        status_code, headers, text = 503, {"retry-after": "30"}, "busy"
+
+    c = LLMClient("gemini", api_key="k", budget_s=60)
+    def post(url, **k):
+        clock[0] += 2  # each request takes 2s
+        return R()
+    monkeypatch.setattr(c._session, "post", post)
+    with pytest.raises(LLMRateLimitError, match="overloaded"):
+        c.chat("sys", [{"role": "user", "content": "hi"}])
+    assert clock[0] <= 62

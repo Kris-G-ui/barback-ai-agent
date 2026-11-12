@@ -168,7 +168,7 @@ with tab_chat:
     prompt = prompt or st.session_state.pop("queued", None)
     if prompt and llm_ready:
         st.session_state.display.append({"role": "user", "content": prompt})
-        with st.spinner("BarBack is thinking…"):
+        with st.spinner("BarBack is thinking… (up to ~1 min if the AI service is busy)"):
             push_result(agent.send(prompt))
         st.rerun()
 

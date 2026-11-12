@@ -84,6 +84,7 @@ class LLMClient:
     timeout_s: float = 45.0
     max_retries: int = 4
     base_backoff_s: float = 1.0
+    budget_s: float = 60.0          # hard cap on total time for one chat() call, incl. fallbacks
     _session: requests.Session = field(default_factory=requests.Session, repr=False)
 
     def __post_init__(self) -> None:
@@ -104,9 +105,14 @@ class LLMClient:
         primary = self.model
         candidates = [primary] + [m for m in FALLBACK_MODELS.get(self.provider, []) if m != primary]
         last_exc: LLMError | None = None
+        overall = time.time() + self.budget_s
+        saved_retries = self.max_retries
         try:
-            for m in candidates:
+            for i, m in enumerate(candidates):
                 self.model = m
+                self.max_retries = saved_retries if i == 0 else 1  # backups: one quick retry
+                # primary gets ~55% of the budget so the backups still have time to run
+                self._deadline = min(overall, time.time() + self.budget_s * 0.55) if i == 0 else overall
                 try:
                     resp = self._chat_once(system, messages)
                     if m != primary:
@@ -120,6 +126,7 @@ class LLMClient:
             ) from last_exc
         finally:
             self.model = primary
+            self.max_retries = saved_retries
 
     def _chat_once(self, system: str, messages: list[dict]) -> LLMResponse:
         """Send a conversation and return the assistant's text.
@@ -134,10 +141,13 @@ class LLMClient:
         start = time.time()
         while True:
             try:
-                resp = self._session.post(url, headers=headers, json=payload, timeout=self.timeout_s)
+                remaining = self._deadline - time.time()
+                if remaining < 3:
+                    raise LLMOverloadedError(f"{self.provider} took too long to respond.")
+                resp = self._session.post(url, headers=headers, json=payload, timeout=min(self.timeout_s, remaining))
             except (requests.ConnectionError, requests.Timeout) as exc:
-                if attempt >= self.max_retries:
-                    raise LLMError(f"Network error talking to {self.provider}: {exc}") from exc
+                if attempt >= self.max_retries or not self._can_wait(attempt):
+                    raise LLMOverloadedError(f"Network error/timeout talking to {self.provider}: {exc}") from exc
                 self._sleep(attempt, None)
                 attempt += 1
                 continue
@@ -145,7 +155,7 @@ class LLMClient:
             if resp.status_code in (401, 403):
                 raise LLMAuthError(f"{self.provider} rejected the API key ({resp.status_code}).")
             if resp.status_code == 429 or resp.status_code >= 500:
-                if attempt >= self.max_retries:
+                if attempt >= self.max_retries or not self._can_wait(attempt):
                     if resp.status_code == 429:
                         raise LLMRateLimitError(
                             f"{self.provider} rate limit hit; gave up after {attempt} retries."
@@ -187,15 +197,22 @@ class LLMClient:
             )
 
     # --------------------------------------------------------------- helpers
-    def _sleep(self, attempt: int, retry_after: str | None) -> None:
+    _deadline: float = float("inf")
+
+    def _delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after:
             try:
-                time.sleep(min(float(retry_after), 30))
-                return
+                return min(float(retry_after), 8)
             except ValueError:
                 pass
-        delay = self.base_backoff_s * (2**attempt) + random.uniform(0, 0.5)
-        time.sleep(min(delay, 30))
+        return min(self.base_backoff_s * (2**attempt) + random.uniform(0, 0.5), 8)
+
+    def _can_wait(self, attempt: int) -> bool:
+        """Only retry if the backoff + another request still fits in the time budget."""
+        return time.time() + self._delay(attempt) + 3 < self._deadline
+
+    def _sleep(self, attempt: int, retry_after: str | None) -> None:
+        time.sleep(self._delay(attempt, retry_after))
 
     # Anthropic -------------------------------------------------------------
     def _build_anthropic(self, system, messages):
