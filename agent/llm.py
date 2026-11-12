@@ -79,7 +79,7 @@ class LLMClient:
         if self.provider not in DEFAULT_MODELS:
             raise LLMError(f"Unknown provider '{self.provider}'. Use one of {list(DEFAULT_MODELS)}")
         self.model = self.model or DEFAULT_MODELS[self.provider]
-        self.api_key = self.api_key or os.getenv(KEY_ENV[self.provider])
+        self.api_key = (self.api_key or os.getenv(KEY_ENV[self.provider]) or "").strip().strip('"').strip("'")
         if not self.api_key:
             raise LLMAuthError(
                 f"No API key for {self.provider}. Set {KEY_ENV[self.provider]} "
@@ -120,6 +120,11 @@ class LLMClient:
                 self._sleep(attempt, resp.headers.get("retry-after"))
                 attempt += 1
                 continue
+            if resp.status_code == 400 and ("API_KEY_INVALID" in resp.text or "API key not valid" in resp.text):
+                raise LLMAuthError(
+                    f"{self.provider} says the API key is not valid. Check {KEY_ENV[self.provider]} "
+                    "in your Streamlit secrets (full key, no extra spaces)."
+                )
             if resp.status_code >= 400:
                 raise LLMResponseError(f"{self.provider} error {resp.status_code}: {resp.text[:500]}")
 
