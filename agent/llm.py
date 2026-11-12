@@ -115,6 +115,7 @@ class LLMClient:
             candidates.remove(sticky[0])
             candidates.insert(0, sticky[0])
         last_exc: LLMError | None = None
+        self._saw_429 = False
         overall = time.time() + self.budget_s
         saved_retries = self.max_retries
         try:
@@ -135,8 +136,13 @@ class LLMClient:
                     return resp
                 except (LLMRateLimitError, LLMOverloadedError) as exc:
                     last_exc = exc
+            if self._saw_429:
+                raise LLMRateLimitError(
+                    f"Hit the {self.provider} API rate limit / quota (HTTP 429). Free-tier keys allow only a "
+                    "few requests per minute — wait a minute, or use a paid key."
+                ) from last_exc
             raise LLMRateLimitError(
-                f"{self.provider} is overloaded right now (tried {', '.join(candidates)}). "
+                f"{self.provider} is overloaded right now (HTTP 503; tried {', '.join(candidates)}). "
                 "Wait a minute and try again."
             ) from last_exc
         finally:
@@ -169,6 +175,11 @@ class LLMClient:
 
             if resp.status_code in (401, 403):
                 raise LLMAuthError(f"{self.provider} rejected the API key ({resp.status_code}).")
+            if resp.status_code == 429:
+                self._saw_429 = True
+                # quota errors don't clear in seconds; don't burn more requests retrying
+                if "quota" in resp.text.lower() or "RESOURCE_EXHAUSTED" in resp.text:
+                    raise LLMRateLimitError(f"{self.provider} quota exceeded on {self.model}.")
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt >= self.max_retries or not self._can_wait(attempt):
                     if resp.status_code == 429:
@@ -213,6 +224,7 @@ class LLMClient:
 
     # --------------------------------------------------------------- helpers
     _deadline: float = float("inf")
+    _saw_429: bool = False
 
     def _delay(self, attempt: int, retry_after: str | None = None) -> float:
         if retry_after:

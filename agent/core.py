@@ -29,6 +29,32 @@ class TurnResult:
     pending: list[ActionCall] = field(default_factory=list)
 
 
+def _table(rows: list[dict]) -> str:
+    if not rows:
+        return "_(none)_"
+    cols = list(rows[0].keys())
+    out = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    out += ["| " + " | ".join(str(r.get(c, "")) for c in cols) + " |" for r in rows[:30]]
+    return "\n".join(out)
+
+
+def _as_markdown(data) -> str:
+    """Readable rendering of an action result, used when the LLM can't summarize."""
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        return _table(data)
+    if isinstance(data, dict):
+        lines, tables = [], []
+        for k, v in data.items():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                tables.append(_table(v))
+            elif isinstance(v, dict):
+                lines.append(f"- **{k}:** " + ", ".join(f"{a}: {b}" for a, b in v.items()))
+            elif v is not None:
+                lines.append(f"- **{k}:** {v}")
+        return "\n\n".join(tables + ["\n".join(lines)] if lines else tables)
+    return str(data)
+
+
 class Agent:
     def __init__(self, llm, toolbox: Toolbox, audit: AuditLogger, max_steps: int = 6, max_repairs: int = 2):
         self.llm = llm
@@ -158,9 +184,9 @@ class Agent:
             if done and self.history and self.history[-1]["role"] == "user":
                 # Actions already ran: keep them, and close the turn with a plain summary
                 # so the user still gets the results and the history stays well-formed.
-                lines = [f"- `{s.text}` → {json.dumps(s.data, default=str)[:1500]}" for s in done]
-                msg = ("I completed these actions, but the AI service failed before I could write a "
-                       f"summary ({exc}). Raw results:\n" + "\n".join(lines))
+                parts = [f"**`{s.text}`**\n\n{_as_markdown(s.data)}" for s in done]
+                msg = ("⚠️ I completed these actions, but the AI service failed before I could write a "
+                       f"summary — {exc}\n\n" + "\n\n".join(parts))
                 self.history.append({"role": "assistant", "content": json.dumps(
                     {"thought": "summary failed", "actions": [], "response": msg})})
                 self.pending, self._pending_results = [], []

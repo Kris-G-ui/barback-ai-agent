@@ -260,7 +260,7 @@ def test_results_kept_when_summary_call_fails(make):
         LLMRateLimitError("overloaded"),
     ])
     res = agent.send("what's low?")
-    assert res.status == "done" and "Raw results" in res.response and "Jameson" in res.response
+    assert res.status == "done" and "| name |" in res.response and "Jameson" in res.response and "estimated_total" in res.response
     assert agent.history[-1]["role"] == "assistant"
 
 
