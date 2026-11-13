@@ -9,7 +9,7 @@ inventory database, and it reports back. It also finds what's below par, writes
 supplier order emails, exports reports and pings the team chat.
 
 - **Live demo:** https://barback-ai-agent-8dcpla7kcputfwpfq5bgpz.streamlit.app/
-- **Demo video:** `<your YouTube URL>`
+- **Demo video:** https://youtu.be/rNd_EnIKT6A
 
 ---
 
